@@ -12,8 +12,10 @@ def main():
     
     utils.print_colored("🚀 Инициализация завершена", "green")
     utils.print_colored(f"📁 Текущая директория: {assistant.current_directory}", "blue")
-    utils.print_colored(f"🎯 Потоковый вывод: {'включен' if config.STREAMING_ENABLED else 'выключен'}", "yellow")
-    utils.print_colored(f"⚡ Скорость вывода: {config.STREAM_DELAY} сек/символ", "yellow")
+    utils.print_colored(f"🔧 Текущий провайдер: {assistant.provider_manager.current_provider}", "yellow")
+    utils.print_colored(f"🤖 Текущая модель: {assistant.provider_manager.current_model}", "yellow")
+    utils.print_colored(f"🎯 Потоковый вывод: {'включен' if config.STREAMING_ENABLED else 'выключен'}", "cyan")
+    utils.print_colored(f"⚡ Скорость вывода: {config.STREAM_DELAY} сек/символ", "cyan")
     utils.print_colored("💡 Введите !help для списка команд", "yellow")
     utils.print_colored("-" * 70, "cyan")
     
@@ -23,7 +25,6 @@ def main():
                 user_input = input("👤 Вы: ").strip()
                 
                 if user_input.lower() in ['exit', 'quit', 'выход', '!exit']:
-                    # Сохраняем историю перед выходом
                     assistant.history_manager.save_history()
                     utils.print_colored("👋 До свидания! Хорошего кодинга!", "cyan")
                     break
@@ -31,26 +32,25 @@ def main():
                 if not user_input:
                     continue
                 
-                # Для не-streaming команд показываем ответ сразу
-                if user_input.split()[0].lower() in ['!read', '!ls', '!dir', '!pwd', '!info', '!search', 
-                                                    '!history', '!export', '!import', '!clear', '!save', '!stream', '!speed']:
-                    response = assistant.chat(user_input)
-                    if not config.STREAMING_ENABLED:
-                        utils.print_colored("🤖 AI:", "green")
-                        print(response)
-                    print()  # Пустая строка после ответа
-                else:
-                    # Для AI запросов используем streaming
-                    response = assistant.chat(user_input)
-                    if not config.STREAMING_ENABLED and not response.startswith("❌"):
-                        # Если streaming выключен, выводим ответ целиком
+                # Определяем тип команды для правильного отображения
+                is_file_command = user_input.split()[0].lower() in [
+                    '!read', '!ls', '!dir', '!pwd', '!info', '!search', 
+                    '!history', '!export', '!import', '!clear', '!save', 
+                    '!stream', '!speed', '!provider', '!model', '!models', 
+                    '!set', '!test', '!help'
+                ]
+                
+                response = assistant.chat(user_input)
+                
+                # Для файловых команд и команд настройки показываем ответ сразу
+                if is_file_command or not config.STREAMING_ENABLED:
+                    if not response.startswith("❌"):
                         utils.print_colored("🤖 AI:", "green")
                         print(response)
                 
                 utils.print_colored("-" * 70, "cyan")
                 
             except KeyboardInterrupt:
-                # Сохраняем историю при прерывании
                 assistant.history_manager.save_history()
                 utils.print_colored("\n👋 Прервано пользователем. До свидания!", "cyan")
                 break
@@ -59,7 +59,6 @@ def main():
                 utils.print_colored("Попробуйте перезапустить программу.", "yellow")
                 
     finally:
-        # Завершаем сессию при выходе
         assistant.close()
         utils.print_colored("Сессия завершена.", "blue")
 

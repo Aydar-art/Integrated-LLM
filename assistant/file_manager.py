@@ -193,21 +193,18 @@ class FileManager:
             
             found_files = []
             
-            # Если паттерн содержит расширение
-            if '.' in pattern and not pattern.startswith('.'):
-                # Поиск по точному соответствию
+            # Если это шаблон типа *.py
+            if pattern.startswith('*.'):
+                extension = pattern[1:]  # убираем звездочку
                 for root, dirs, files in os.walk(validated_path):
                     for file in files:
-                        if pattern in file:
+                        if file.lower().endswith(extension.lower()):
                             found_files.append(os.path.join(root, file))
             else:
-                # Поиск по расширению или имени
+                # Поиск по имени файла (без пути)
                 for root, dirs, files in os.walk(validated_path):
                     for file in files:
-                        file_ext = Path(file).suffix.lower()
-                        if pattern.startswith('*') and file_ext == pattern[1:]:
-                            found_files.append(os.path.join(root, file))
-                        elif pattern in file:
+                        if pattern.lower() in file.lower():
                             found_files.append(os.path.join(root, file))
             
             return found_files[:config.MAX_FILES_PER_QUERY]

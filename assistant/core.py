@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, List, Dict, Any
 from .file_manager import FileManager
 from .history_manager import HistoryManager
-from .ollama_client import OllamaClient
+from .providers import ProviderManager
 import config
 import utils
 
@@ -21,10 +21,25 @@ class CodeAssistant:
         # Инициализация компонентов
         self.file_manager = FileManager(self.current_directory)
         self.history_manager = HistoryManager(self.current_directory)
-        self.ollama_client = OllamaClient(model)
+        self.provider_manager = ProviderManager()
+        
+        # Установка модели по умолчанию
+        self.provider_manager.set_model(model)
         
         # Загружаем историю при запуске
         self.history_manager.load_history()
+
+    def _build_prompt(self, user_input: str) -> str:
+        """Построение полного промта."""
+        context = f"Текущий провайдер: {self.provider_manager.current_provider}\n"
+        context += f"Текущая модель: {self.provider_manager.current_model}\n"
+        
+        # Добавляем историю
+        history_context = self.history_manager.get_conversation_context()
+        if history_context:
+            context += history_context
+        
+        return f"{config.SYSTEM_PROMPT}\n\n{context}\n\nЗапрос: {user_input}"
     
     def process_combined_query(self, user_input: str) -> Tuple[str, bool]:
         """
@@ -44,11 +59,16 @@ class CodeAssistant:
         clean_query = user_input
         search_pattern = None
         
+        # Сначала проверяем специальные команды, которые должны идти в AI
+        if any(cmd in user_input.lower() for cmd in ['проанализируй', 'анализ', 'проверь', 'review', 'analyze']):
+            # Это аналитический запрос - отправляем в AI
+            return user_input, True
+        
         # Поиск паттернов типа *.py
         pattern_match = re.search(r'\*\.([a-zA-Z0-9]+)', user_input)
         if pattern_match:
             search_pattern = f"*.{pattern_match.group(1)}"
-            found_files = self.file_manager.find_files_by_pattern(search_pattern)
+            found_files = self.file_manager.find_files_by_pattern(search_pattern, ".")
             clean_query = clean_query.replace(pattern_match.group(0), '').strip()
         
         # Поиск конкретных файлов
@@ -73,16 +93,22 @@ class CodeAssistant:
             if search_pattern:
                 info_msg = f"🔍 Найдено файлов по шаблону '{search_pattern}': {len(found_files)}\n\n"
             else:
-                info_msg = f"📚 Обрабатываю {len(found_files)} файлов:\n" + "\n".join([f"  • {os.path.basename(f)}" for f in found_files]) + "\n\n"
+                file_list = "\n".join([f"  • {os.path.basename(f)}" for f in found_files])
+                info_msg = f"📚 Обрабатываю {len(found_files)} файлов:\n{file_list}\n\n"
             
             # Читаем все найденные файлы
             files_content = self.file_manager.read_multiple_files(found_files)
+            
+            # Если запрос пустой после извлечения файлов, добавляем стандартный промт
+            if not clean_query or clean_query.strip() == "":
+                clean_query = "Проанализируй предоставленные файлы и дай обзор кода"
             
             # Комбинируем содержимое файлов с запросом пользователя
             combined_prompt = f"{info_msg}{files_content}\n\n💬 Запрос пользователя: {clean_query}"
             return combined_prompt, True
         
         return user_input, True
+
     
     def analyze_code_file(self, file_path: str) -> str:
         """
@@ -128,7 +154,7 @@ class CodeAssistant:
         Предложи конкретные улучшения с примерами кода.
         """
         
-        return self.ollama_client.send_request(analysis_prompt, self.history_manager.conversation_history)
+        return self.provider_manager.send_request(analysis_prompt)
     
     def analyze_multiple_files(self, file_paths: List[str]) -> str:
         """
@@ -154,7 +180,7 @@ class CodeAssistant:
         Дай общие рекомендации по проекту и конкретные советы для каждого файла.
         """
         
-        return self.ollama_client.send_request(analysis_prompt, self.history_manager.conversation_history)
+        return self.provider_manager.send_request(analysis_prompt)
     
     def search_files(self, pattern: str, search_dir: str = ".") -> str:
         """
@@ -241,13 +267,23 @@ class CodeAssistant:
         command_parts = user_input.split()
         cmd = command_parts[0].lower()
         
-        # Обработка специальных команд
+        # Команды работы с файлами
         if cmd == "!read" and len(command_parts) > 1:
             file_paths = command_parts[1:]
             if len(file_paths) == 1:
+                # Возвращаем содержимое файла как есть (для отображения)
                 return self.file_manager.read_file(file_paths[0]), False
             else:
+                # Возвращаем содержимое нескольких файлов как есть
                 return self.file_manager.read_multiple_files(file_paths), False
+        
+        elif cmd == "!analyze" and len(command_parts) > 1:
+            file_paths = command_parts[1:]
+            if len(file_paths) == 1:
+                # Анализ отправляется в нейросеть - возвращаем промт для AI
+                return self.analyze_code_file(file_paths[0]), True
+            else:
+                return self.analyze_multiple_files(file_paths), True
         
         elif cmd == "!ls" or cmd == "!dir":
             path = ' '.join(command_parts[1:]) if len(command_parts) > 1 else "."
@@ -265,18 +301,68 @@ class CodeAssistant:
             file_path = ' '.join(command_parts[1:])
             return self.file_manager.get_file_info(file_path), False
         
-        elif cmd == "!analyze" and len(command_parts) > 1:
-            file_paths = command_parts[1:]
-            if len(file_paths) == 1:
-                return self.analyze_code_file(file_paths[0]), False
-            else:
-                return self.analyze_multiple_files(file_paths), False
-        
         elif cmd == "!search" and len(command_parts) > 1:
             pattern = command_parts[1]
             search_dir = ' '.join(command_parts[2:]) if len(command_parts) > 2 else "."
             return self.search_files(pattern, search_dir), False
         
+        # Команды управления LLM
+        elif cmd == "!provider":
+            if len(command_parts) > 1:
+                provider_name = command_parts[1].lower()
+                old_provider = self.provider_manager.current_provider
+                if self.provider_manager.set_provider(provider_name):
+                    # Автоматически устанавливаем модель по умолчанию для провайдера
+                    default_model = config.DEFAULT_MODELS.get(provider_name, "default")
+                    self.provider_manager.set_model(default_model)
+                    
+                    # Тестируем соединение
+                    test_result = self.provider_manager.test_connection(provider_name)
+                    return f"✅ Провайдер изменен: {old_provider} → {provider_name}\n{test_result}", False
+                else:
+                    available = self.provider_manager.get_available_providers()
+                    return f"❌ Провайдер {provider_name} не найден. Доступно: {', '.join(available)}", False
+            else:
+                current = self.provider_manager.current_provider
+                available = self.provider_manager.get_available_providers()
+                return f"📊 Текущий провайдер: {current}\nДоступно: {', '.join(available)}", False
+        
+        elif cmd == "!model":
+            if len(command_parts) > 1:
+                model_name = ' '.join(command_parts[1:])
+                old_model = self.provider_manager.current_model
+                if self.provider_manager.set_model(model_name):
+                    return f"✅ Модель изменена: {old_model} → {model_name}", False
+                else:
+                    return f"❌ Не удалось установить модель {model_name}", False
+            else:
+                current = self.provider_manager.current_model
+                available = self.provider_manager.get_available_models()
+                models_str = '\n'.join([f"  • {model}" for model in available[:10]])
+                return f"📊 Текущая модель: {current}\nДоступно:\n{models_str}", False
+        
+        elif cmd == "!models":
+            provider_name = command_parts[1] if len(command_parts) > 1 else self.provider_manager.current_provider
+            models = self.provider_manager.get_available_models(provider_name)
+            if models:
+                models_list = '\n'.join([f"  • {model}" for model in models])
+                return f"📋 Модели {provider_name}:\n{models_list}", False
+            else:
+                return f"❌ Нет доступных моделей для {provider_name}", False
+        
+        elif cmd == "!set" and len(command_parts) > 2:
+            provider_name = command_parts[1].lower()
+            api_key = command_parts[2]
+            if self.provider_manager.set_api_key(provider_name, api_key):
+                return f"✅ API ключ для {provider_name} установлен", False
+            else:
+                return f"❌ Не удалось установить API ключ для {provider_name}", False
+        
+        elif cmd == "!test":
+            provider_name = command_parts[1] if len(command_parts) > 1 else self.provider_manager.current_provider
+            return self.provider_manager.test_connection(provider_name), False
+        
+        # Команды истории и настроек
         elif cmd == "!clear":
             confirm = len(command_parts) > 1 and command_parts[1].lower() == "confirm"
             return self.history_manager.clear_history(confirm), False
@@ -307,7 +393,7 @@ class CodeAssistant:
                 elif mode in ['off', 'false', '0', 'disable']:
                     config.STREAMING_ENABLED = False
                     return "✅ Потоковый вывод выключен", False
-            return f"📊 Текущий режим: {'включен' if config.STREAMING_ENABLED else 'выключен'}\nИспользуйте: !stream on/off", False
+            return f"📊 Текущий режим: {'включен' if config.STREAMING_ENABLED else 'выключен'}", False
         
         elif cmd == "!speed":
             if len(command_parts) > 1:
@@ -320,53 +406,49 @@ class CodeAssistant:
                         return "❌ Скорость должна быть между 0.001 и 0.1 секунд", False
                 except ValueError:
                     return "❌ Введите число для скорости (например: 0.02)", False
-            return f"📊 Текущая скорость: {config.STREAM_DELAY} сек/символ\nИспользуйте: !speed <значение>", False
+            return f"📊 Текущая скорость: {config.STREAM_DELAY} сек/символ", False
         
         elif cmd == "!help":
             return self.get_help(), False
         
-        # Комбинированные запросы с несколькими файлами
+        # Обработка обычных запросов к AI
         else:
             return self.process_combined_query(user_input)
-    
+        
     def get_help(self) -> str:
         """Справка по командам."""
-        return """🆘 Доступные команды и форматы:
+        return """🆘 Доступные команды:
+
+🚀 Управление LLM:
+!provider <name>     - сменить провайдер (ollama, openai, deepseek)
+!model <name>        - сменить модель
+!models [provider]   - показать доступные модели
+!set <provider> <key>- установить API ключ
+!test [provider]     - проверить соединение
 
 📁 Файловые операции:
-!read <file1> [file2] ... - прочитать один или несколько файлов
-!analyze <file1> [file2] ... - проанализировать один или несколько файлов
-!info <file> - информация о файле
+!read <file1> [file2] - прочитать файлы
+!analyze <file>       - проанализировать код
+!info <file>          - информация о файле
+!search <pattern>     - поиск файлов
 
-💬 Комбинированные запросы:
-прочитай <file1> <file2> и <запрос> - прочитать несколько файлов и выполнить запрос
-анализ кода в <file1> <file2> - прочитать и проанализировать несколько файлов
-*.py <запрос> - найти все Python файлы и выполнить запрос
+💾 История:
+!history             - показать историю
+!history stats       - статистика
+!save                - сохранить историю
+!clear confirm       - очистить историю
 
-🔍 Поиск и анализ:
-!search <pattern> [dir] - поиск файлов по шаблону
-!ls [path] - список файлов в директории
-!cd <path> - сменить директорию
-
-💾 История сообщений:
-!history - показать последние сообщения
-!history stats - статистика истории
-!save - сохранить историю в файл
-!export [file_path] - экспорт истории в файл
-!import <file_path> - импорт истории из файла
-!clear confirm - очистить историю (с подтверждением)
-
-🎯 Настройки streaming:
-!stream on/off - включить/выключить потоковый вывод
-!speed <значение> - установить скорость вывода (сек/символ)
+🎯 Настройки:
+!stream on/off       - потоковый вывод
+!speed <value>       - скорость вывода
 
 🔧 Примеры:
-!read main.py utils.py
-!analyze service.js model.py
-прочитай config.json package.json и объясни настройки
-*.js: найди общие паттерны
-!stream on  # Включить потоковый вывод
-!speed 0.02 # Установить скорость
+!provider openai
+!model gpt-4
+!set openai sk-xxx
+!test openai
+!provider ollama
+!model llama3.1:8b
 """
     
     def chat(self, user_input: str) -> str:
@@ -379,16 +461,21 @@ class CodeAssistant:
         if not send_to_ai:
             return processed_input
         
-        # Отправляем в AI
-        response = self.ollama_client.send_request(processed_input, self.history_manager.conversation_history)
+        # Строим полный промт
+        full_prompt = self._build_prompt(processed_input)
         
-        # Сохраняем в историю (если не было ошибки соединения)
-        if not any(error_keyword in response for error_keyword in ["❌", "⏰", "🌐", "Ошибка: Ollama"]):
+        # Отправляем запрос через текущий провайдер
+        response = self.provider_manager.send_request(
+            prompt=full_prompt,
+            stream=config.STREAMING_ENABLED
+        )
+        
+        # Сохраняем в историю
+        if not response.startswith("❌"):
             self.history_manager.add_message(user_input, response)
         
         return response
     
     def close(self):
         """Закрытие ресурсов."""
-        self.ollama_client.close()
         self.history_manager.save_history()

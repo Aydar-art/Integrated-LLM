@@ -208,3 +208,15 @@ class HistoryManager:
         # Автосохранение истории каждые 10 сообщений
         if len(self.conversation_history) % 10 == 0:
             self.save_history()
+    
+    def get_conversation_context(self, limit: int = 3) -> str:
+        """Получение контекста разговора для промта."""
+        if not self.conversation_history:
+            return ""
+        
+        context = "Предыдущий разговор:\n"
+        for chat in self.conversation_history[-limit:]:
+            context += f"User: {chat['user'][:100]}...\n"
+            context += f"AI: {chat['ai'][:100]}...\n"
+        
+        return context

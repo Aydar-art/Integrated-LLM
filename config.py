@@ -33,6 +33,14 @@ MAX_FILES_PER_QUERY = 5  # Максимальное количество фай�
 STREAMING_ENABLED = True  # Включить потоковый вывод
 STREAM_DELAY = 0.01  # Задержка между чанками в секундах (для плавности)
 
+# Провайдеры по умолчанию
+DEFAULT_PROVIDER = "ollama"
+DEFAULT_MODELS = {
+    "ollama": "llama3.1:8b",
+    "openai": "gpt-3.5-turbo",
+    "deepseek": "deepseek-chat"
+}
+
 # Карта языков программирования по расширениям
 LANGUAGE_MAP = {
     '.py': 'Python', '.js': 'JavaScript', '.ts': 'TypeScript', '.java': 'Java',
