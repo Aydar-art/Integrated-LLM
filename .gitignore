@@ -1,3 +1,12 @@
+# Файл с историей чата
 chat_history.json
+
+# Кэш Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Настройки VS Code
 .vscode/
