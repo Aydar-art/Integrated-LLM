@@ -40,8 +40,8 @@ class OllamaProvider(LLMProvider):
             "options": {
                 "temperature": temperature,
                 "top_p": 0.9,
-                "num_predict": 8192,
-                "repeat_penalty": 1.1
+                "num_predict": 4096,
+                "repeat_penalty": 1.2
             }
         }
         
