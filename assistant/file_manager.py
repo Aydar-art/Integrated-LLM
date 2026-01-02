@@ -306,3 +306,109 @@ class FileManager:
             
         except Exception as e:
             return f"Ошибка при получении информации о файле: {str(e)}"
+    
+    def read_folder_files(self, folder_path: str, file_pattern: str = "*") -> str:
+        """
+        Считывание всех файлов из указанной папки.
+        
+        Args:
+            folder_path: Путь к папке
+            file_pattern: Шаблон для фильтрации файлов (например, "*.py")
+            
+        Returns:
+            str: Объединенное содержимое всех файлов
+        """
+        try:
+            validated_path, is_valid = self.validate_path(folder_path)
+            if not is_valid:
+                return validated_path
+            
+            if not os.path.exists(validated_path):
+                return f"❌ Папка {validated_path} не найдена"
+            
+            if not os.path.isdir(validated_path):
+                return f"❌ {validated_path} не является папкой"
+            
+            # Получаем все файлы в папке
+            all_files = []
+            for root, dirs, files in os.walk(validated_path):
+                for file in files:
+                    # Фильтрация по шаблону
+                    if file_pattern == "*" or file.endswith(file_pattern.replace("*", "")):
+                        file_path = os.path.join(root, file)
+                        all_files.append(file_path)
+            
+            if not all_files:
+                return f"❌ В папке {validated_path} не найдено файлов по шаблону '{file_pattern}'"
+            
+            # Ограничиваем количество файлов
+            if len(all_files) > config.MAX_FILES_PER_QUERY:
+                all_files = all_files[:config.MAX_FILES_PER_QUERY]
+                warning = f"⚠️ Ограничено до {config.MAX_FILES_PER_QUERY} файлов из {len(all_files)} найденных\n\n"
+            else:
+                warning = ""
+            
+            # Читаем все файлы
+            folder_info = f"📁 Папка: {validated_path}\n"
+            folder_info += f"📊 Найдено файлов: {len(all_files)}\n"
+            folder_info += f"🎯 Шаблон: {file_pattern}\n\n"
+            
+            files_content = self.read_multiple_files(all_files)
+            return f"{warning}{folder_info}{files_content}"
+            
+        except PermissionError:
+            return f"❌ Нет прав доступа к папке {folder_path}"
+        except Exception as e:
+            return f"❌ Ошибка чтения папки: {str(e)}"
+
+    def get_folder_stats(self, folder_path: str) -> str:
+        """
+        Получение статистики по папке.
+        
+        Args:
+            folder_path: Путь к папке
+            
+        Returns:
+            str: Статистика папки
+        """
+        try:
+            validated_path, is_valid = self.validate_path(folder_path)
+            if not is_valid:
+                return validated_path
+            
+            if not os.path.exists(validated_path):
+                return f"❌ Папка {validated_path} не найдена"
+            
+            if not os.path.isdir(validated_path):
+                return f"❌ {validated_path} не является папкой"
+            
+            total_files = 0
+            total_size = 0
+            languages = set()
+            
+            for root, dirs, files in os.walk(validated_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    try:
+                        stat = os.stat(file_path)
+                        total_size += stat.st_size
+                        total_files += 1
+                        
+                        # Определяем язык файла
+                        language = utils.detect_language_from_extension(file_path)
+                        languages.add(language)
+                    except:
+                        continue
+            
+            stats = [
+                f"📊 Статистика папки: {validated_path}",
+                f"📁 Всего файлов: {total_files}",
+                f"💾 Общий размер: {utils.format_file_size(total_size)}",
+                f"🌐 Языки программирования: {', '.join(sorted(languages)) if languages else 'не определены'}",
+                f"📂 Уровней вложенности: {validated_path.count(os.sep) - validated_path.rstrip(os.sep).count(os.sep) + 1}"
+            ]
+            
+            return "\n".join(stats)
+            
+        except Exception as e:
+            return f"❌ Ошибка получения статистики: {str(e)}"

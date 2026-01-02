@@ -182,6 +182,73 @@ class CodeAssistant:
         
         return self.provider_manager.send_request(analysis_prompt)
     
+    def analyze_folder(self, folder_path: str, file_pattern: str = "*") -> str:
+        """
+        Анализ всех файлов в указанной папке.
+        
+        Args:
+            folder_path: Путь к папке
+            file_pattern: Шаблон для фильтрации файлов (например, "*.py")
+            
+        Returns:
+            str: Результат анализа от нейросети
+        """
+        # Сначала читаем все файлы из папки
+        files_content = self.file_manager.read_folder_files(folder_path, file_pattern)
+        
+        # Если есть ошибка при чтении, возвращаем ее
+        if files_content.startswith("❌") or files_content.startswith("Ошибка"):
+            return files_content
+        
+        analysis_prompt = f"""
+        Проанализируй ВСЕ файлы из папки {folder_path} и дай комплексный обзор проекта:
+
+        {files_content}
+
+        Проанализируй:
+        1. **Архитектуру проекта** - общую структуру и организацию кода
+        2. **Качество кода** - стиль, читаемость, соблюдение best practices
+        3. **Потенциальные проблемы** - баги, уязвимости, антипаттерны
+        4. **Связи между файлами** - зависимости и взаимодействие модулей
+        5. **Возможности оптимизации** - что можно улучшить
+        6. **Рекомендации по рефакторингу** - конкретные предложения
+
+        Дай структурированный ответ с примерами кода и конкретными исправлениями.
+        Обрати внимание на:
+        - Согласованность стиля кода между файлами
+        - Повторяющийся код или дублирование
+        - Отсутствие обработки ошибок
+        - Потенциальные уязвимости безопасности
+        - Возможности для оптимизации производительности
+        """
+        
+        return self.provider_manager.send_request(analysis_prompt)
+
+    def analyze_folder_by_language(self, folder_path: str, language: str = "python") -> str:
+        """
+        Анализ файлов конкретного языка в папке.
+        
+        Args:
+            folder_path: Путь к папке
+            language: Язык для анализа (python, javascript, java, etc.)
+            
+        Returns:
+            str: Результат анализа
+        """
+        file_extension = {
+            "python": "*.py",
+            "javascript": "*.js", 
+            "typescript": "*.ts",
+            "java": "*.java",
+            "cpp": "*.cpp",
+            "c": "*.c",
+            "html": "*.html",
+            "css": "*.css"
+        }.get(language.lower(), "*")
+        
+        return self.analyze_folder(folder_path, file_extension)
+
+    
     def search_files(self, pattern: str, search_dir: str = ".") -> str:
         """
         Поиск файлов по шаблону.
@@ -269,21 +336,67 @@ class CodeAssistant:
         
         # Команды работы с файлами
         if cmd == "!read" and len(command_parts) > 1:
+            # Обработка специальных случаев для папок
+            if command_parts[1] == "folder" and len(command_parts) > 2:
+                folder_path = ' '.join(command_parts[2:])
+                file_pattern = "*"  # По умолчанию все файлы
+                return self.file_manager.read_folder_files(folder_path, file_pattern), False
+            
             file_paths = command_parts[1:]
             if len(file_paths) == 1:
-                # Возвращаем содержимое файла как есть (для отображения)
                 return self.file_manager.read_file(file_paths[0]), False
             else:
-                # Возвращаем содержимое нескольких файлов как есть
                 return self.file_manager.read_multiple_files(file_paths), False
+            
+        elif cmd == "!readfolder" and len(command_parts) > 1:
+            folder_path = command_parts[1]
+            file_pattern = command_parts[2] if len(command_parts) > 2 else "*"
+            return self.file_manager.read_folder_files(folder_path, file_pattern), False
+        
+        elif cmd == "!stats" and len(command_parts) > 1:
+            folder_path = ' '.join(command_parts[1:])
+            return self.file_manager.get_folder_stats(folder_path), False
+        
+        elif cmd == "!folder" and len(command_parts) > 1:
+            subcmd = command_parts[1].lower()
+            if subcmd == "read" and len(command_parts) > 2:
+                folder_path = ' '.join(command_parts[2:])
+                return self.file_manager.read_folder_files(folder_path, "*"), False
+            elif subcmd == "stats" and len(command_parts) > 2:
+                folder_path = ' '.join(command_parts[2:])
+                return self.file_manager.get_folder_stats(folder_path), False
+            else:
+                return "❌ Используйте: !folder read <path> или !folder stats <path>", False
         
         elif cmd == "!analyze" and len(command_parts) > 1:
+        # Анализ папки
+            if command_parts[1] == "folder" and len(command_parts) > 2:
+                folder_path = ' '.join(command_parts[2:])
+                file_pattern = "*"
+                return self.analyze_folder(folder_path, file_pattern), True
+            
+            # Анализ по языку
+            elif command_parts[1] == "language" and len(command_parts) > 3:
+                language = command_parts[2]
+                folder_path = ' '.join(command_parts[3:])
+                return self.analyze_folder_by_language(folder_path, language), True
+            
+            # Обычный анализ файла
             file_paths = command_parts[1:]
             if len(file_paths) == 1:
-                # Анализ отправляется в нейросеть - возвращаем промт для AI
                 return self.analyze_code_file(file_paths[0]), True
             else:
                 return self.analyze_multiple_files(file_paths), True
+            
+        elif cmd == "!analyzefolder" and len(command_parts) > 1:
+            folder_path = command_parts[1]
+            file_pattern = command_parts[2] if len(command_parts) > 2 else "*"
+            return self.analyze_folder(folder_path, file_pattern), True
+        
+        elif cmd == "!analyzelanguage" and len(command_parts) > 2:
+            language = command_parts[1]
+            folder_path = ' '.join(command_parts[2:])
+            return self.analyze_folder_by_language(folder_path, language), True
         
         elif cmd == "!ls" or cmd == "!dir":
             path = ' '.join(command_parts[1:]) if len(command_parts) > 1 else "."
@@ -419,36 +532,45 @@ class CodeAssistant:
         """Справка по командам."""
         return """🆘 Доступные команды:
 
-🚀 Управление LLM:
-!provider <name>     - сменить провайдер (ollama, openai, deepseek)
-!model <name>        - сменить модель
-!models [provider]   - показать доступные модели
-!set <provider> <key>- установить API ключ
-!test [provider]     - проверить соединение
-
 📁 Файловые операции:
-!read <file1> [file2] - прочитать файлы
-!analyze <file>       - проанализировать код
-!info <file>          - информация о файле
-!search <pattern>     - поиск файлов
+!read <file> [file2]     - прочитать файл(ы)
+!read folder <path>      - прочитать все файлы в папке
+!readfolder <path> [pattern] - прочитать файлы в папке по шаблону
+!folder read <path>      - прочитать все файлы в папке
+!folder stats <path>     - статистика папки
+!stats <path>            - статистика папки
+!analyze <file>          - проанализировать код файла
+!info <file>             - информация о файле
+!search <pattern>        - поиск файлов
+!analyze folder <path>       - проанализировать ВСЕ файлы в папке
+!analyze language <lang> <path> - анализировать файлы конкретного языка
+!analyzefolder <path> [pattern] - анализ папки с шаблоном
+!analyzelanguage <lang> <path> - анализ файлов языка в папке
+
+🚀 Управление LLM:
+!provider <name>         - сменить провайдер (ollama, openai, deepseek)
+!model <name>            - сменить модель
+!models [provider]       - показать доступные модели
+!set <provider> <key>   - установить API ключ
+!test [provider]         - проверить соединение
 
 💾 История:
-!history             - показать историю
-!history stats       - статистика
-!save                - сохранить историю
-!clear confirm       - очистить историю
+!history                 - показать историю
+!history stats           - статистика
+!save                    - сохранить историю
+!clear confirm           - очистить историю
 
 🎯 Настройки:
-!stream on/off       - потоковый вывод
-!speed <value>       - скорость вывода
+!stream on/off           - потоковый вывод
+!speed <value>           - скорость вывода
 
 🔧 Примеры:
-!provider openai
-!model gpt-4
-!set openai sk-xxx
-!test openai
-!provider ollama
-!model llama3.1:8b
+!read main.py config.json
+!read folder src/
+!readfolder src/ *.py
+!folder stats projects/
+!stats /path/to/project
+!analyze utils.py
 """
     
     def chat(self, user_input: str) -> str:
