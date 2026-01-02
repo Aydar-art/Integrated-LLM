@@ -7,7 +7,8 @@ This app helps to use local or cloud LLM from Ollama to diretly read from your c
 
 2. If you want use local LLM, you can install from official ```ollama pull <model>```
 3. Launch ollama server ```ollama serve```
-4. run app ```main.py```
+4. Activate virtual environment ```source .venv/bin/activate```
+5. run app ```main.py```
 
 ### Using
 📁 **Файловые операции:**
